@@ -14,6 +14,8 @@
 
 ### 💡 Others
 
+- Switch from `ajv` to `@expo/schema-utils` ([#42218](https://github.com/expo/expo/pull/42218) by [@kitten](https://github.com/kitten))
+
 ## 1.0.10 - 2025-12-05
 
 _This version does not introduce any user-facing changes._

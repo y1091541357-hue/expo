@@ -27,7 +27,7 @@ describe.each(
     },
     serve: {
       env: {
-        TEST_SECRET_KEY: 'test-secret-key',
+        TEST_SECRET_RUNTIME_KEY: 'runtime-secret-value',
       },
     },
   })
@@ -98,12 +98,16 @@ describe.each(
     expect(data.params).toHaveProperty('postId', 'my-test-post');
   });
 
-  it('loader can access server environment variables during runtime', async () => {
-    const response = await server.fetchAsync('/_expo/loaders/env');
-    expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data).toHaveProperty('TEST_SECRET_KEY', 'test-secret-key');
-  });
+  (server.isExpoStart ? it.skip : it)(
+    'loader can access server environment variables',
+    async () => {
+      const response = await server.fetchAsync('/_expo/loaders/env');
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data).not.toHaveProperty('TEST_SECRET_KEY', 'test-secret-key');
+      expect(data).toHaveProperty('TEST_SECRET_RUNTIME_KEY', 'runtime-secret-value');
+    }
+  );
 
   it('returns `{}` for `undefined` loader data', async () => {
     const response = await server.fetchAsync('/_expo/loaders/nullish/undefined');

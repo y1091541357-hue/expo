@@ -19,7 +19,7 @@ const server :Workerd.Worker = (
     (name = "_expo/loaders/request.js", commonJsModule = embed "_expo/loaders/request.js"),
   ],
   bindings = [
-    (name = "TEST_SECRET_KEY", text = "test-secret-key"),
+    (name = "TEST_SECRET_RUNTIME_KEY", text = "runtime-secret-value"),
   ],
   compatibilityDate = "2025-05-05",
   compatibilityFlags = [

@@ -55,7 +55,9 @@ Object.defineProperty(exports, "useRouteInfo", { enumerable: true, get: function
 const imperative_api_1 = require("./imperative-api");
 const href_1 = require("./link/href");
 const PreviewRouteContext_1 = require("./link/preview/PreviewRouteContext");
+const LoaderCache_1 = require("./loaders/LoaderCache");
 const ServerDataLoaderContext_1 = require("./loaders/ServerDataLoaderContext");
+const getLoaderData_1 = require("./loaders/getLoaderData");
 const utils_1 = require("./loaders/utils");
 /**
  * Returns the [navigation state](https://reactnavigation.org/docs/navigation-state/)
@@ -244,9 +246,6 @@ class ReadOnlyURLSearchParams extends URLSearchParams {
         throw new Error('The URLSearchParams object return from useSearchParams is read-only');
     }
 }
-const loaderDataCache = new Map();
-const loaderPromiseCache = new Map();
-const loaderErrorCache = new Map();
 /**
  * Returns the result of the `loader` function for the calling route.
  *
@@ -270,49 +269,31 @@ function useLoaderData() {
     const routeNode = (0, Route_1.useRouteNode)();
     const params = useLocalSearchParams();
     const serverDataLoaderContext = (0, react_1.use)(ServerDataLoaderContext_1.ServerDataLoaderContext);
+    const loaderCache = react_1.default.useContext(LoaderCache_1.LoaderCacheContext);
     if (!routeNode) {
         throw new Error('No route node found. This is likely a bug in expo-router.');
     }
     const resolvedPath = `/${(0, href_1.resolveHref)({ pathname: routeNode?.route, params })}`;
-    // First invocation of this hook will happen server-side, so we look up the loaded data from context
+    // First invocation of this hook will happen server-side, so we look up the loaded data from
+    // context
     if (serverDataLoaderContext) {
         return serverDataLoaderContext[resolvedPath];
     }
-    // The second invocation happens after the client has hydrated on initial load, so we look up the data injected
-    // by `<PreloadedDataScript />` using `globalThis.__EXPO_ROUTER_LOADER_DATA__`
+    // The second invocation happens after the client has hydrated on initial load, so we look up the
+    // data injected by `<PreloadedDataScript />` using `globalThis.__EXPO_ROUTER_LOADER_DATA__`
     if (typeof window !== 'undefined' && globalThis.__EXPO_ROUTER_LOADER_DATA__) {
         if (globalThis.__EXPO_ROUTER_LOADER_DATA__[resolvedPath]) {
             return globalThis.__EXPO_ROUTER_LOADER_DATA__[resolvedPath];
         }
     }
-    // Check error cache BEFORE data cache - this prevents infinite retry loops
-    // when a loader fails. We throw the cached error instead of starting a new fetch.
-    if (loaderErrorCache.has(resolvedPath)) {
-        throw loaderErrorCache.get(resolvedPath);
+    const result = (0, getLoaderData_1.getLoaderData)({
+        resolvedPath,
+        cache: loaderCache,
+        fetcher: utils_1.fetchLoaderModule,
+    });
+    if (result instanceof Promise) {
+        return (0, react_1.use)(result);
     }
-    // Check cache for route data
-    if (loaderDataCache.has(resolvedPath)) {
-        return loaderDataCache.get(resolvedPath);
-    }
-    // Fetch data if not cached
-    if (!loaderPromiseCache.has(resolvedPath)) {
-        const promise = (0, utils_1.fetchLoaderModule)(resolvedPath)
-            .then((data) => {
-            loaderDataCache.set(resolvedPath, data);
-            loaderErrorCache.delete(resolvedPath); // Clear any previous error
-            loaderPromiseCache.delete(resolvedPath);
-            return data;
-        })
-            .catch((error) => {
-            const wrappedError = new Error(`Failed to load loader data for route: ${resolvedPath}`, {
-                cause: error,
-            });
-            loaderErrorCache.set(resolvedPath, wrappedError); // Cache the error
-            loaderPromiseCache.delete(resolvedPath);
-            throw wrappedError;
-        });
-        loaderPromiseCache.set(resolvedPath, promise);
-    }
-    return (0, react_1.use)(loaderPromiseCache.get(resolvedPath));
+    return result;
 }
 //# sourceMappingURL=hooks.js.map

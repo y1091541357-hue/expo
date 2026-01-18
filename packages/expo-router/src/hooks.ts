@@ -9,7 +9,9 @@ import { store, useRouteInfo } from './global-state/router-store';
 import { router, Router } from './imperative-api';
 import { resolveHref } from './link/href';
 import { usePreviewInfo } from './link/preview/PreviewRouteContext';
+import { LoaderCacheContext } from './loaders/LoaderCache';
 import { ServerDataLoaderContext } from './loaders/ServerDataLoaderContext';
+import { getLoaderData } from './loaders/getLoaderData';
 import { fetchLoaderModule } from './loaders/utils';
 import { RouteParams, RouteSegments, UnknownOutputParams, Route, LoaderFunction } from './types';
 
@@ -345,10 +347,6 @@ class ReadOnlyURLSearchParams extends URLSearchParams {
   }
 }
 
-const loaderDataCache = new Map<string, any>();
-const loaderPromiseCache = new Map<string, Promise<any>>();
-const loaderErrorCache = new Map<string, Error>();
-
 type LoaderFunctionResult<T extends LoaderFunction<any>> =
   T extends LoaderFunction<infer R> ? R : unknown;
 
@@ -375,6 +373,7 @@ export function useLoaderData<T extends LoaderFunction<any> = any>(): LoaderFunc
   const routeNode = useRouteNode();
   const params = useLocalSearchParams();
   const serverDataLoaderContext = use(ServerDataLoaderContext);
+  const loaderCache = React.useContext(LoaderCacheContext);
 
   if (!routeNode) {
     throw new Error('No route node found. This is likely a bug in expo-router.');
@@ -382,51 +381,29 @@ export function useLoaderData<T extends LoaderFunction<any> = any>(): LoaderFunc
 
   const resolvedPath = `/${resolveHref({ pathname: routeNode?.route, params })}`;
 
-  // First invocation of this hook will happen server-side, so we look up the loaded data from context
+  // First invocation of this hook will happen server-side, so we look up the loaded data from
+  // context
   if (serverDataLoaderContext) {
     return serverDataLoaderContext[resolvedPath];
   }
 
-  // The second invocation happens after the client has hydrated on initial load, so we look up the data injected
-  // by `<PreloadedDataScript />` using `globalThis.__EXPO_ROUTER_LOADER_DATA__`
+  // The second invocation happens after the client has hydrated on initial load, so we look up the
+  // data injected by `<PreloadedDataScript />` using `globalThis.__EXPO_ROUTER_LOADER_DATA__`
   if (typeof window !== 'undefined' && globalThis.__EXPO_ROUTER_LOADER_DATA__) {
     if (globalThis.__EXPO_ROUTER_LOADER_DATA__[resolvedPath]) {
       return globalThis.__EXPO_ROUTER_LOADER_DATA__[resolvedPath];
     }
   }
 
-  // Check error cache first to prevent infinite retry loops when a loader fails.
-  // We throw the cached error instead of starting a new fetch.
-  if (loaderErrorCache.has(resolvedPath)) {
-    // eslint-disable-next-line no-throw-literal
-    throw loaderErrorCache.get(resolvedPath) as Error;
+  const result = getLoaderData<LoaderFunctionResult<T>>({
+    resolvedPath,
+    cache: loaderCache,
+    fetcher: fetchLoaderModule,
+  });
+
+  if (result instanceof Promise) {
+    return use(result);
   }
 
-  // Check cache for route data
-  if (loaderDataCache.has(resolvedPath)) {
-    return loaderDataCache.get(resolvedPath);
-  }
-
-  // Fetch data if not cached
-  if (!loaderPromiseCache.has(resolvedPath)) {
-    const promise = fetchLoaderModule(resolvedPath)
-      .then((data) => {
-        loaderDataCache.set(resolvedPath, data);
-        loaderErrorCache.delete(resolvedPath); // Clear any previous error
-        loaderPromiseCache.delete(resolvedPath);
-        return data;
-      })
-      .catch((error) => {
-        const wrappedError = new Error(`Failed to load loader data for route: ${resolvedPath}`, {
-          cause: error,
-        });
-        loaderErrorCache.set(resolvedPath, wrappedError); // Cache the error
-        loaderPromiseCache.delete(resolvedPath);
-        throw wrappedError;
-      });
-
-    loaderPromiseCache.set(resolvedPath, promise);
-  }
-
-  return use(loaderPromiseCache.get(resolvedPath)!);
+  return result;
 }

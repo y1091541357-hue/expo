@@ -1,4 +1,10 @@
-import { renderHook as tlRenderHook, act } from '@testing-library/react-native';
+import {
+  renderHook as tlRenderHook,
+  act,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react-native';
 import React from 'react';
 import { Text } from 'react-native';
 import { expectType } from 'tsd';
@@ -15,8 +21,14 @@ import {
 } from '../hooks';
 import Stack from '../layouts/Stack';
 import Tabs from '../layouts/Tabs';
+import { LoaderCache, LoaderCacheContext } from '../loaders/LoaderCache';
+import { fetchLoaderModule } from '../loaders/utils';
 import { renderRouter } from '../testing-library';
 import { inMemoryContext, MemoryContext } from '../testing-library/context-stubs';
+
+jest.mock('../loaders/utils', () => ({
+  fetchLoaderModule: jest.fn(),
+}));
 
 /*
  * Creates an Expo Router context around the hook, where every router renders the hook
@@ -698,6 +710,7 @@ describe(useRootNavigationState, () => {
 
 describe(useLoaderData, () => {
   const originalWindow = global.window;
+  const fetchLoaderModuleMock = fetchLoaderModule as jest.MockedFunction<typeof fetchLoaderModule>;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -740,5 +753,131 @@ describe(useLoaderData, () => {
     });
 
     expectType<{ user: { id: number; name: string }; timestamp: number }>(result.current);
+  });
+
+  it('returns cached data on rerender without refetching', async () => {
+    const loaderCache = new LoaderCache();
+    let triggerRetry: (() => void) | undefined;
+
+    loaderCache.setData('/data', { value: 'cached' });
+
+    function DataRoute() {
+      const [resetKey, setResetKey] = React.useState(0);
+      const data = useLoaderData<() => { value: string }>();
+
+      React.useLayoutEffect(() => {
+        triggerRetry = () => setResetKey((value) => value + 1);
+        return () => {
+          triggerRetry = undefined;
+        };
+      }, []);
+
+      return (
+        <Text testID="data" key={resetKey}>
+          {data.value}
+        </Text>
+      );
+    }
+
+    render(
+      <LoaderCacheContext.Provider value={loaderCache}>
+        <ExpoRoot
+          context={inMemoryContext({ data: DataRoute })}
+          location={new URL('/data', 'test://test')}
+        />
+      </LoaderCacheContext.Provider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('data')).toHaveTextContent('cached');
+    });
+
+    expect(fetchLoaderModuleMock).not.toHaveBeenCalled();
+
+    act(() => {
+      triggerRetry?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('data')).toHaveTextContent('cached');
+    });
+
+    expect(fetchLoaderModuleMock).not.toHaveBeenCalled();
+  });
+
+  it('does not refetch when a cached error rethrows on rerender', async () => {
+    const loaderCache = new LoaderCache();
+    const error = new Error('Cached loader failure');
+    let triggerRetry: (() => void) | undefined;
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    loaderCache.setError('/error', error);
+
+    class TestErrorBoundary extends React.Component<
+      { children: React.ReactNode },
+      { error: Error | null }
+    > {
+      state = { error: null };
+
+      static getDerivedStateFromError(thrown: Error) {
+        return { error: thrown };
+      }
+
+      render() {
+        if (this.state.error) {
+          return <Text testID="error">{this.state.error.message}</Text>;
+        }
+
+        return this.props.children;
+      }
+    }
+
+    function LoaderConsumer() {
+      useLoaderData();
+      return <Text testID="data">Data</Text>;
+    }
+
+    function ErrorRoute() {
+      const [resetKey, setResetKey] = React.useState(0);
+
+      React.useLayoutEffect(() => {
+        triggerRetry = () => setResetKey((value) => value + 1);
+        return () => {
+          triggerRetry = undefined;
+        };
+      }, []);
+
+      return (
+        <TestErrorBoundary key={resetKey}>
+          <LoaderConsumer />
+        </TestErrorBoundary>
+      );
+    }
+
+    render(
+      <LoaderCacheContext.Provider value={loaderCache}>
+        <ExpoRoot
+          context={inMemoryContext({ error: ErrorRoute })}
+          location={new URL('/error', 'test://test')}
+        />
+      </LoaderCacheContext.Provider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('error')).toBeTruthy();
+    });
+
+    expect(fetchLoaderModuleMock).not.toHaveBeenCalled();
+
+    act(() => {
+      triggerRetry?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('error')).toBeTruthy();
+    });
+
+    expect(fetchLoaderModuleMock).not.toHaveBeenCalled();
+    consoleErrorSpy.mockRestore();
   });
 });

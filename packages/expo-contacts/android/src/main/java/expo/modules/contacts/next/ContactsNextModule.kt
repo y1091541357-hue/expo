@@ -63,6 +63,7 @@ class ContactsNextModule : Module() {
 
     Class(Contact::class) {
       Constructor { id: String ->
+        printf(id)
         contactFactory.create(id)
       }
 

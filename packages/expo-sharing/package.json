@@ -1,7 +1,7 @@
 {
   "name": "expo-sharing",
   "version": "14.0.7",
-  "description": "Provides a way to share files directly with other compatible applications.",
+  "description": "Provides a way to share files directly with other compatible applications and to receive compatible data shared from other apps.",
   "main": "build/index.js",
   "types": "build/index.d.ts",
   "sideEffects": false,

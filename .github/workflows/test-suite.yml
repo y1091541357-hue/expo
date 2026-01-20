@@ -28,8 +28,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      is_ios_affected: ${{ steps.filter.outputs.ios }}
+      is_android_affected: ${{ steps.filter.outputs.android }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            shared: &shared
+              - "packages/**/*.ts"
+              - "packages/**/*.tsx"
+              - "packages/**/*.js"
+              - "packages/**/*.jsx"
+              - "packages/**/package.json"
+              - "yarn.lock"
+              - .github/workflows/test-suite.yml
+              - .github/actions/use-android-emulator/action.yml
+              - apps/bare-expo/**
+              - apps/test-suite/**
+
+            ios:
+              - *shared
+              - "packages/**/ios/**"
+              - "**/*.swift"
+              - "**/*.m"
+
+            android:
+              - *shared
+              - "packages/**/android/**"
+              - "**/*.java"
+              - "**/*.kt"
+              - "**/*.gradle"
+              - '**/gradle.properties'
   ios-build:
     runs-on: macos-15
+    needs: check-changes
+    if: needs.check-changes.outputs.is_ios_affected == 'true'
     permissions:
       # REQUIRED: Allow updating fingerprint in action caches
       actions: write
@@ -213,6 +251,8 @@ jobs:
 
   android-build:
     runs-on: ubuntu-24.04
+    needs: check-changes
+    if: needs.check-changes.outputs.is_android_affected == 'true'
     permissions:
       # REQUIRED: Allow updating fingerprint in action caches
       actions: write
